@@ -1,6 +1,7 @@
 // ignore_for_file: prefer_const_constructors
 import 'package:calculator/buttons.dart';
 import 'package:calculator/caculationHistory.dart';
+import 'package:calculator/database/dbhelper.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:math_expressions/math_expressions.dart';
@@ -58,6 +59,38 @@ class _HomePageState extends State<HomePage> {
   var userInput = '0';
   var result = '0';
 
+  var tempUserInput;
+  var tempResult;
+
+  // List<Map<String,dynamic>> _lastTenHistory = [];
+  List<Map<String, dynamic>> _lastTenHistory = [];
+
+  // refresh the last 10 history
+  void _refreshHistory() async {
+    final data = await SQLHelper.getItems();
+    setState(() {
+      _lastTenHistory = data;
+    });
+  }
+
+// load the last 10 history at the start
+  @override
+  void initState() {
+    super.initState();
+    _refreshHistory();
+  }
+
+// insert a new hisotry to the database
+  Future<void> _addItem() async {
+    await SQLHelper.createItem(userInput, result);
+    _refreshHistory();
+  }
+
+  Future<void> _deleteItem(id) async {
+    await SQLHelper.deleteItem(id);
+    _refreshHistory();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -66,11 +99,9 @@ class _HomePageState extends State<HomePage> {
         leading: Builder(
           builder: (BuildContext context) {
             return IconButton(
-              icon: const Icon(
-                Icons.history
-              ),
+              icon: const Icon(Icons.history),
               onPressed: () {
-                Scaffold.of(context).openDrawer();
+                _lastTenHistory.isEmpty? showHistoryClearToast(context):Scaffold.of(context).openDrawer();
               },
               tooltip: MaterialLocalizations.of(context).openAppDrawerTooltip,
             );
@@ -79,7 +110,79 @@ class _HomePageState extends State<HomePage> {
         centerTitle: true,
         backgroundColor: Colors.deepPurple,
       ),
-      drawer: Drawer(),
+      drawer: Drawer(
+        child: Column(
+          children: [
+            Expanded(
+              flex: 10,
+              child: ListView.builder(
+                itemCount: _lastTenHistory.length,
+                itemBuilder: (context, index) {
+                  return Card(
+                      color: Colors.deepPurple[100],
+                      child: Padding(
+                        padding: const EdgeInsets.all(4.0),
+                        child: Column(
+                          children: [
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                _lastTenHistory[index]['result'],
+                                textAlign: TextAlign.left,
+                                style: TextStyle(
+                                    fontSize: 20, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: Text(
+                                _lastTenHistory[index]['query'],
+                                textAlign: TextAlign.left,
+                                textDirection: TextDirection.rtl,
+                                style: TextStyle(fontSize: 18),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ));
+                  ;
+                },
+              ),
+            ),
+            Expanded(
+              flex: 1,
+              child: Container(
+                color: Colors.deepPurple.withOpacity(0.7),
+                child: Center(
+                  child: InkWell(
+                    onTap: () => {
+                      for (int i = 0; i < _lastTenHistory.length; i++)
+                        {_deleteItem(_lastTenHistory[i]['id'])},
+                        showHistoryClearToast(context)
+                        
+                    },
+                    child: Container(
+                      padding:
+                          EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(15),
+                          color: Colors.green),
+                      child: Text(
+                        "Clear",
+                        style: TextStyle(color: Colors.white, fontSize: 20),
+                      ),
+                    ),
+                  ),
+                ),
+                // margin: EdgeInsets.all(12.0),
+                // child: Text("Clear",style: TextStyle(color: Colors.white),),
+                // padding: EdgeInsets.symmetric(horizontal: 30.0,vertical: 16.0),
+                // decoration: BoxDecoration(borderRadius: BorderRadius.circular(20),color: Colors.green),
+              ),
+            )
+          ],
+        ),
+      ),
       backgroundColor: Colors.deepPurple[100],
       body: Column(
         children: [
@@ -153,6 +256,14 @@ class _HomePageState extends State<HomePage> {
                                   setState(() {
                                     equalPressed();
                                   });
+                                  // condition to store data based on whether user has updated the previous data or not
+                                  if (tempUserInput != userInput &&
+                                      tempResult != result) {
+                                    tempUserInput = userInput;
+                                    tempResult = result;
+
+                                    _addItem();
+                                  }
                                 },
                                 buttonText: buttons[index],
                                 color: isOperator(buttons[index])
@@ -226,8 +337,49 @@ class _HomePageState extends State<HomePage> {
     // only display the operation symbol if userInput is not 0 or the last element of userInput is not operationsSymbol itself
     if (!userInput.endsWith(operationSymbol) && userInput != '0') {
       userInput += operationSymbol;
+      if (operationSymbol == '%') {
+        percentageCalculate();
+      }
     }
   }
 
-  void invertInput() {}
+  void invertInput() {
+    if (!userInput.startsWith("-")) {
+      userInput = "-" + userInput;
+    } else {
+      userInput = userInput.substring(1, userInput.length);
+    }
+  }
+
+  void percentageCalculate() {
+    var count = userInput.replaceAll("=", "").replaceAll("", "").split("%");
+    if (count.length == 2) {
+      if (count[1].isNotEmpty) {
+        var s = (int.parse(count[0]) / 100) * int.parse(count[1]);
+        setState(() {
+          result = s.toString();
+        });
+      } else {
+        var s = int.parse(count[0]) / 100;
+        setState(() {
+          result = s.toString();
+        });
+      }
+    } else if (count.length == 1 || count.length == 2) {
+      var s = int.parse(count[0]) / 100;
+      setState(() {
+        result = s.toString();
+      });
+    }
+  }
+
+  void showHistoryClearToast(BuildContext context){
+    final scaffold = ScaffoldMessenger.of(context);
+    // final scaffoldclose = Scaffold.of(context).closeDrawer();
+    scaffold.showSnackBar(
+      SnackBar(content:_lastTenHistory.isEmpty?Text("History is Empty"):Text("History has been cleared"),
+      )
+    );
+    
+  }
 }
